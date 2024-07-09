@@ -1,0 +1,80 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_IMAGE = "jithendarramagiri1998/cicd_pipeline:${BUILD_NUMBER}"
+        SONAR_URL = "http://100.25.165.186:9000"
+        GIT_REPO_NAME = "ramagirijithendar/mindcircuit13" // Ensure this is correct
+        GIT_USER_NAME = "ramagirijithendar"
+        SONAR_AUTH_TOKEN = credentials('sonarqube')
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Checking out code'
+                git branch: 'main', url: "https://github.com/${GIT_REPO_NAME}.git"
+            }
+        }
+
+        stage('Build Artifact') {
+            steps {
+                echo 'Building Artifact'
+                sh 'mvn clean package'
+            }
+        }
+
+        stage('SonarQube Scan') {
+            steps {
+                echo 'Running SonarQube Scan'
+                sh "mvn sonar:sonar -Dsonar.host.url=${SONAR_URL} -Dsonar.login=${env.SONAR_AUTH_TOKEN}"
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo 'Building Docker Image'
+                sh "docker build -t ${DOCKER_IMAGE} ."
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                echo 'Pushing to Docker Hub'
+
+                withCredentials([string(credentialsId: 'docker', variable: 'docker_password')]) {
+                    sh "docker login -u jithendarramagiri1998 -p ${docker_password}"
+                    sh "docker push ${DOCKER_IMAGE}"
+                }
+
+                echo 'Pushed to Docker Hub'
+            }
+        }
+
+        stage('Update Deployment File') {
+            steps {
+                echo 'Updating Deployment File'
+
+                withCredentials([string(credentialsId: 'git', variable: 'githubtoken')]) {
+                    sh '''
+                        # Configure git user
+                        git config user.email "jithendarramagiri1998@gmail.com"
+                        git config user.name "ramagirijithendar"
+                        
+                        # Replace the tag in the deployment YAML file with the current build number
+                        sed -i "s/batch13:.*/batch13:${BUILD_NUMBER}/g" deploymentfiles/deployment.yml
+                        
+                        # Stage all changes
+                        git add deploymentfiles/deployment.yml
+                        
+                        # Commit changes with a message containing the build number
+                        git commit -m "Update deployment image to version ${BUILD_NUMBER}"
+                        
+                        # Push changes to the main branch of the GitHub repository
+                        git push https://${githubtoken}@github.com/${GIT_REPO_NAME} HEAD:main
+                    '''
+                }
+            }
+        }
+    }
+}
